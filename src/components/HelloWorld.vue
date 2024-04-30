@@ -38,9 +38,11 @@
       </div>
     </div>
     <!-- 显示歌词 -->
-    <div class="lyrics" ref="lyricsContainer" @scroll="onLyricScroll">
-      <div v-for="(line, index) in currentLyric" :key="index" :class="{ current: isCurrentLine(index) }">
-        {{ line.text }}
+    <div class="lyrics-container" ref="lyricsContainer">
+      <div class="lyrics" :style="{ top: `- ${lyricOffset}px` }">
+        <div v-for="(line, index) in currentLyric" :key="index" :class="{ current: isCurrentLine(index) }">
+          {{ line.text }}
+        </div>
       </div>
     </div>
   </div>
@@ -345,9 +347,7 @@ const playCurrentTrack = async () => {
 const updateCurrentTime = (event: Event) => {
   const audio = event.target as HTMLAudioElement;
   currentTime.value = audio.currentTime;
-  if (!isUserScrolling.value) {
-    updateLyricScroll(); // 根据播放进度更新歌词滚动
-  }
+  updateLyricOffset(); // 根据播放进度更新歌词滚动
 };
 // 调节音量
 const changeVolume = () => {
@@ -362,20 +362,24 @@ const handleTrackEnd = () => {
     // 顺序播放
     case 'sequence':
       nextTrack();
+      lyricOffset.value = 0;
       break;
     // 单曲循环
     case 'repeat-one':
       playCurrentTrack();
+      lyricOffset.value = 0;
       break;
     // 列表循环
     case 'repeat-all':
       nextTrack();
+      lyricOffset.value = 0;
       break;
     // 随机播放
     case 'shuffle':
       const randomIndex = Math.floor(Math.random() * playerList.value.length);
       currentTrackIndex.value = randomIndex;
       playCurrentTrack();
+      lyricOffset.value = 0;
       break;
   }
 };
@@ -383,7 +387,6 @@ const handleTrackEnd = () => {
 const seek = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const audio = document.querySelector('audio');
-  isUserScrolling.value = false;
   if (audio) {
     audio.currentTime = parseFloat(target.value); // 跳转到新的播放位置
   }
@@ -402,63 +405,54 @@ const currentLyric = computed(() => {
 });
 
 // 解析歌词并生成带有时间戳和内容的列表
-const parseLyrics = (lyric: string) => {
+const parseLyrics = (lyric: any) => {
   const lines = lyric.split('\n');
-  const parsed = lines.map(line => {
-    const match = line.match(/\[(\d+):(\d+\.\d+)\] (.*)/);
+  const parsed = lines.map((line: any) => {
+    const match = line.match(/\[(\d+):(\d+\.\d+)\] ?(.*)/); // 只需匹配文本部分
     if (match) {
       const [, mins, secs, text] = match;
       return {
         time: parseFloat(mins) * 60 + parseFloat(secs),
-        text,
+        text: text.trim(), // 确保去掉多余的空格
       };
     }
-    return {time: 0, text: line}; // 无时间戳的处理
-  });
+    return null; // 没有匹配成功的行返回 null
+  }).filter((item: any) => item && item.text.length > 0); // 过滤掉空行或没有文本的行
   return parsed;
 };
 
 // 滚动偏移量
-const isUserScrolling = ref(false); // 是否正在手动滚动
-let autoScrollTimer = <any>null;
+const lyricOffset = ref(0);
 
 // 滚动歌词容器的引用
 const lyricsContainer = ref<HTMLDivElement | null>(null);
 
 // 更新歌词偏移，确保当前歌词在视野中
-const updateLyricScroll = () => {
-  const container = lyricsContainer.value;
-  const currentIndex = currentLyric.value.findIndex((line) => line.time > currentTime.value);
-  if (currentIndex >= 0 && container) {
-    container.style.scrollBehavior = 'smooth'; // 平滑滚动
-    const lineHeight = 30; // 每行30px的高度
-    const scrollOffset = (currentIndex - 1) * lineHeight; // 高亮歌词的顶端位置
-    // const scrollCenter = container.clientHeight / 2; // 容器的中间点
-    // const newScrollTop = scrollOffset - scrollCenter + lineHeight / 2; // 中心调整
-    container.scrollTop = scrollOffset; // 更新容器的滚动位置 scrollOffset
+const updateLyricOffset = () => {
+  const currentLyricIndex = currentLyric.value.findIndex((line: any) => line.time > currentTime.value);
+  // 防止歌曲结束后偏移量重置
+  if (currentTime.value <= duration.value) {
+    if (currentLyricIndex > 0) {
+      lyricOffset.value = (currentLyricIndex - 1) * 30; // 30px 代表每行歌词的高度
+    }
+  } else {
+    // 如果歌曲结束，保持在最后一行
+    lyricOffset.value = (currentLyric.value.length - 1) * 30;
   }
 };
-
-// 处理用户手动滚动歌词
-const onLyricScroll = () => {
-  if (autoScrollTimer) {
-    clearTimeout(autoScrollTimer);
-  }
-  isUserScrolling.value = true;
-  autoScrollTimer = setTimeout(() => {
-    isUserScrolling.value = false;
-    console.log('======我要恢复滚动了========')
-    updateLyricScroll(); // 自动恢复歌词位置
-  }, 2000); // 3秒后自动恢复
-};
-
 
 // 判断当前行是否为当前时间对应的歌词行
 const isCurrentLine = (index: number) => {
-  const nextIndex = currentLyric.value.findIndex(
-    (line) => line.time > currentTime.value
-  );
-  return index === nextIndex - 1; // 当前时间对应的歌词行
+  const nextIndex = currentLyric.value.findIndex((line: any) => line.time > currentTime.value);
+  if (currentTime.value <= duration.value) {
+    if (nextIndex > 0) {
+      return index === nextIndex - 1; // 当前时间对应的歌词行
+    } else {
+      if (currentTime.value > 0) {
+        return index === currentLyric.value.length - 1;
+      }
+    }
+  }
 };
 
 </script>
@@ -478,13 +472,23 @@ const isCurrentLine = (index: number) => {
 }
 
 
-.lyrics {
+.lyrics-container {
   flex: 1;
-  height: 300px;
+  height: 500px;
   overflow-y: auto;
   position: relative;
-  background-color: #f8f5f5;
-  transition: top 0.3s;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+}
+
+.lyrics-container:active {
+  cursor: grab;
+}
+
+.lyrics {
+  position: absolute;
+  transition: top 0.3s linear;
 }
 
 .lyrics > div {
